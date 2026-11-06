@@ -1,0 +1,169 @@
+name: Release adapter
+
+# One click: Actions → Release adapter → Run workflow (from main). Three jobs run in order:
+#
+# 1. prepare: turn the pending changesets into the next version and run every check.
+#    Only if all of them pass, commit the bump to main and tag it vX.Y.Z (one atomic push).
+# 2. build: check out the tag, prove it is that version, and pack the tarball.
+# 3. publish: publish that tarball to npm with provenance.
+#
+# Publishing authenticates with npm trusted publishing (OIDC), bound to this workflow file and
+# the npm-release environment. npm only allows a trusted publisher on a package that already
+# exists, so until the first version is out, an NPM_TOKEN secret on the npm-release environment
+# is used instead. Delete that secret once the trusted publisher is configured.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Bump, check and tag
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.push.outputs.tag }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Run Release adapter from main (got ${GITHUB_REF})."
+          exit 1
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.22.1'
+          cache: npm
+      - run: npm ci
+      - name: Require pending changesets
+        run: |
+          if ! ls .changeset/*.md 2>/dev/null | grep -v '/README.md$' >/dev/null; then
+            echo "::error::No changesets to release. Add one in a PR with: npx changeset"
+            exit 1
+          fi
+      - name: Apply changesets
+        id: version
+        run: |
+          set -euo pipefail
+          npx changeset version
+          npm install --package-lock-only --ignore-scripts
+          version="$(node -p "require('./package.json').version")"
+          if git ls-remote --exit-code --tags origin "refs/tags/v${version}" >/dev/null; then
+            echo "::error::Tag v${version} already exists. Nothing new to release."
+            exit 1
+          fi
+          if npm view "@adeli/chat-sdk-adapter@${version}" version >/dev/null 2>&1; then
+            echo "::error::@adeli/chat-sdk-adapter@${version} is already on npm."
+            exit 1
+          fi
+          if node -e 'const d=require("./package.json").dependencies||{}; process.exit(Object.values(d).some(v=>/^(file|link|git|github):/.test(v))?0:1)'; then
+            echo "::error::A dependency points at a local path or git ref; depend on published versions before releasing."
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+      # The same gate as CI. Nothing is pushed unless all of it passes.
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm audit --omit=dev --audit-level=high
+      - run: npm run build
+      - name: Check the tarball holds only dist, package.json, README.md and LICENSE
+        run: |
+          set -euo pipefail
+          npm pack --dry-run --json > "$RUNNER_TEMP/pack.json"
+          node -e '
+            const [pkg] = require(process.argv[1]);
+            const allowed = (p) => p.startsWith("dist/") || ["package.json", "README.md", "LICENSE"].includes(p);
+            const extra = pkg.files.map((f) => f.path).filter((p) => !allowed(p));
+            if (extra.length) { console.error("Unexpected files in tarball:", extra); process.exit(1); }
+          ' "$RUNNER_TEMP/pack.json"
+      - name: Commit the version bump to main and tag it
+        id: push
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          tag="v${VERSION}"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m "chore(release): ${VERSION}"
+          git tag -a "$tag" -m "$tag"
+          # One atomic push: main and the tag land together, or neither does (for example if main moved).
+          git push --atomic origin HEAD:refs/heads/main "refs/tags/${tag}"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build tarball from the tag
+    needs: prepare
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ needs.prepare.outputs.tag }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.22.1'
+          cache: npm
+      - name: Require the tag to match package.json
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          test "v$(node -p "require('./package.json').version")" = "$RELEASE_TAG"
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      - name: Pack the tarball without lifecycle scripts
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/release"
+          npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP/release"
+          (cd "$RUNNER_TEMP/release" && sha256sum *.tgz > artifact.sha256)
+      - uses: actions/upload-artifact@v7
+        with:
+          name: adapter-release-tarball
+          path: |
+            ${{ runner.temp }}/release/*.tgz
+            ${{ runner.temp }}/release/artifact.sha256
+          if-no-files-found: error
+
+  publish:
+    name: Publish to npm
+    needs: [prepare, build]
+    # npm's trusted publisher is bound to this workflow file and environment name.
+    environment: npm-release
+    permissions:
+      contents: read
+      id-token: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.22.1'
+          registry-url: https://registry.npmjs.org
+      - uses: actions/download-artifact@v8
+        with:
+          name: adapter-release-tarball
+          path: release
+      - name: Recheck the tarball
+        run: |
+          set -euo pipefail
+          (cd release && sha256sum --check artifact.sha256)
+      - name: Publish the tarball with provenance
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          set -- ./release/*.tgz
+          test "$#" -eq 1
+          # Bootstrap only: a token until the trusted publisher exists; OIDC otherwise.
+          if [ -n "${NPM_TOKEN}" ]; then export NODE_AUTH_TOKEN="${NPM_TOKEN}"; fi
+          # The ./ matters: without it npm reads release/x.tgz as a GitHub user/repo.
+          npm publish "$1" --ignore-scripts --provenance --access public
