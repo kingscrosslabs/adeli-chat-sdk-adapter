@@ -31,7 +31,7 @@
     "chat": "^4.0.0"
   },
   "dependencies": {
-    "@adeli/sdk": "file:../adeli-sdk/.worktrees/chat-sdk-vendor-adapter",
+    "@adeli/sdk": "^0.3.0",
     "@chat-adapter/shared": "^4.44.0"
   },
   "devDependencies": {
