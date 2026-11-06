@@ -1,6 +1,6 @@
 {
   "name": "@adeli/chat-sdk-adapter",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Adeli adapter for Chat SDK: Instagram, Facebook and WhatsApp DMs, and Instagram and TikTok comments, through one API key",
   "type": "module",
   "main": "./dist/index.js",

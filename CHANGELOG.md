@@ -1,5 +1,11 @@
 # @adeli/chat-sdk-adapter
 
+## 1.0.1
+
+### Patch Changes
+
+- 74d0684: README: swap the downloads badge for license and npm provenance badges, and tighten the wording.
+
 ## 1.0.0
 
 ### Major Changes
