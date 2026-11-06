@@ -1,11 +1,12 @@
 # @adeli/chat-sdk-adapter
 
 [![npm version](https://img.shields.io/npm/v/@adeli/chat-sdk-adapter)](https://www.npmjs.com/package/@adeli/chat-sdk-adapter)
-[![npm downloads](https://img.shields.io/npm/dm/@adeli/chat-sdk-adapter)](https://www.npmjs.com/package/@adeli/chat-sdk-adapter)
+[![license](https://img.shields.io/npm/l/@adeli/chat-sdk-adapter)](https://github.com/kingscrosslabs/adeli-chat-sdk-adapter/blob/main/LICENSE)
+[![npm provenance](https://img.shields.io/badge/npm-provenance-2ea44f?logo=npm)](https://www.npmjs.com/package/@adeli/chat-sdk-adapter#provenance)
 
-[Adeli](https://www.tryadeli.com) adapter for [Chat SDK](https://chat-sdk.dev/docs): answer Instagram, Facebook and WhatsApp DMs, and Instagram and TikTok comments, from one bot and one API key.
+This [Adeli](https://www.tryadeli.com) adapter for [Chat SDK](https://chat-sdk.dev/docs) lets one bot answer Instagram, Facebook and WhatsApp DMs, and reply to Instagram and TikTok comments, with one Adeli API key.
 
-Your users connect their accounts in the Adeli dashboard. Your bot never needs its own Meta app, App Review, or TikTok developer access.
+Your users connect their accounts in the Adeli dashboard, so your bot doesn't need its own Meta app, App Review, or TikTok developer access.
 
 ## Installation
 
@@ -129,10 +130,10 @@ createAdeliAdapter({
 
 ## Platform setup
 
-1. **Create an API key.** Sign in at [app.tryadeli.com](https://app.tryadeli.com), open **API keys**, create a key, and set it as `ADELI_API_KEY`.
-2. **Connect accounts.** On the **Accounts** page, connect the Instagram, Facebook Page, WhatsApp Business or TikTok accounts the bot should answer for. Each connected account is one Chat SDK channel, `adeli:<accountId>`.
-3. **Deploy the webhook route** from [Usage](#usage), for example at `https://bot.example.com/api/webhooks/adeli`. It must be `https`.
-4. **Register the webhook** for `message.created`, `message.postback` and `comment.created`. In the dashboard, open **Webhooks**, click **Add webhook**, and enter the URL. Or use the API:
+1. Sign in at [app.tryadeli.com](https://app.tryadeli.com), open **API keys**, create a key, and set it as `ADELI_API_KEY`.
+2. On the **Accounts** page, connect the Instagram, Facebook Page, WhatsApp Business or TikTok accounts the bot should answer for. Each connected account is one Chat SDK channel, `adeli:<accountId>`.
+3. Deploy the webhook route from [Usage](#usage), for example at `https://bot.example.com/api/webhooks/adeli`. It must be `https`.
+4. Register the webhook for `message.created`, `message.postback` and `comment.created`. In the dashboard, open **Webhooks**, click **Add webhook**, and enter the URL. Or use the API:
 
    ```bash
    curl https://app.tryadeli.com/api/v1/webhooks \
@@ -161,8 +162,8 @@ createAdeliAdapter({
    console.log(data.secret); // shown once
    ```
 
-5. **Store the signing secret** the response returns as `ADELI_WEBHOOK_SECRET`. It is shown only once. To rotate it, delete the webhook and create it again.
-6. **Send a test event** from the webhook's row in the dashboard. Test events (`"test": true`) are verified and acknowledged without reaching your handlers.
+5. Store the signing secret the response returns as `ADELI_WEBHOOK_SECRET`. It is shown only once. To rotate it, delete the webhook and create it again.
+6. Send a test event from the webhook's row in the dashboard. Test events (`"test": true`) are verified and acknowledged without reaching your handlers.
 
 Every delivery is signed with `Adeli-Signature` (HMAC-SHA256 with a timestamp). The adapter rejects unsigned, mis-signed and stale (over 300 seconds) deliveries with `401`, answers `200` at once, and runs your handlers in `waitUntil`. Adeli retries failed deliveries for about nine hours with the same event id; Chat SDK deduplicates them.
 
@@ -181,19 +182,19 @@ See the [Adeli webhooks docs](https://www.tryadeli.com/docs/api/webhooks) for th
 | `openDM` | Yes | Yes | Yes | n/a | n/a |
 | Inbound attachments | Yes | Yes | Yes | n/a | n/a |
 
-- **Threads.** A DM thread is one conversation between a connected account and one person. A comment thread is a top-level comment and its replies. Every inbound DM and top-level comment is a mention; replies under a comment reach `onSubscribedMessage` once the thread is subscribed.
-- **Formatting.** All five surfaces show plain text. Markdown is flattened: emphasis markers are dropped, links become `text (url)`, list items start with `- `.
-- **`message.raw`** is an `AdeliRawMessage`: `kind`, `accountId`, `platform`, the provider message or comment id, and the sender. `message.id` is the provider's id (an Instagram `mid`, a WhatsApp `wamid`, a comment id).
+- A DM thread is one conversation between a connected account and one person. A comment thread is a top-level comment and its replies. Every inbound DM and top-level comment is a mention; replies under a comment reach `onSubscribedMessage` once the thread is subscribed.
+- All five surfaces show plain text, so the adapter flattens Markdown: it drops emphasis markers, writes links as `text (url)`, and starts list items with `- `.
+- `message.raw` is an `AdeliRawMessage`: `kind`, `accountId`, `platform`, the provider message or comment id, and the sender. `message.id` is the provider's id (an Instagram `mid`, a WhatsApp `wamid`, a comment id).
 
 ### Limitations
 
-- **The 24-hour window.** Instagram, Facebook and WhatsApp accept free-text messages only within 24 hours of the person's last message. Outside it, a post throws `AdapterError` with code `window_closed`. To open a WhatsApp conversation, send an approved template with [`@adeli/sdk`](https://www.npmjs.com/package/@adeli/sdk) `messages.sendMessage({ body: { platform: "whatsapp", template } })`; Chat SDK messages cannot carry templates.
-- **No edits, reactions or typing indicators.** `editMessage`, `addReaction` and `removeReaction` throw `NotImplementedError`; `startTyping` resolves without doing anything, so portable bots keep working. `deleteMessage` works only on the account's own comments.
-- **Instagram allows three buttons.** A card with more throws `ValidationError`. A button's `id` and `value` must fit Instagram's 1,000-character postback payload.
-- **No outbound files.** Posting files or attachments throws `ValidationError`.
-- **History reads backward.** `fetchMessages` with `direction: "forward"` on a DM reads up to 1,000 messages and returns them in one page.
-- **Usage limits.** A workspace without billing that has used its free monthly sends gets `AdapterRateLimitError` (with `retryAfter` set to the reset time). Provider rate limits (`429`) map to the same error.
-- **Errors.** `401` maps to `AuthenticationError`, `403 permission_required` to `PermissionError` (reconnect the account with the missing permission), `404` to `ResourceNotFoundError`, `400`/`422` to `ValidationError`, and `5xx` or network failures to `NetworkError`, all from `@chat-adapter/shared`.
+- Instagram, Facebook and WhatsApp accept free-text messages only within 24 hours of the person's last message. Outside it, a post throws `AdapterError` with code `window_closed`. To open a WhatsApp conversation, send an approved template with [`@adeli/sdk`](https://www.npmjs.com/package/@adeli/sdk) `messages.sendMessage({ body: { platform: "whatsapp", template } })`; Chat SDK messages cannot carry templates.
+- Bots can't edit messages, react or show typing. `editMessage`, `addReaction` and `removeReaction` throw `NotImplementedError`; `startTyping` resolves without doing anything, so portable bots keep working. `deleteMessage` works only on the account's own comments.
+- Instagram allows three buttons per message. A card with more throws `ValidationError`. A button's `id` and `value` must fit Instagram's 1,000-character postback payload.
+- Posting files or attachments throws `ValidationError`.
+- DM history pages backward. `fetchMessages` with `direction: "forward"` on a DM reads up to 1,000 messages and returns them in one page.
+- A workspace without billing that has used its free monthly sends gets `AdapterRateLimitError` (with `retryAfter` set to the reset time). Provider rate limits (`429`) map to the same error.
+- `401` maps to `AuthenticationError`, `403 permission_required` to `PermissionError` (reconnect the account with the missing permission), `404` to `ResourceNotFoundError`, `400`/`422` to `ValidationError`, and `5xx` or network failures to `NetworkError`, all from `@chat-adapter/shared`.
 
 ## License
 
