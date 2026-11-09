@@ -62,12 +62,12 @@ Use a persistent state adapter such as `@chat-adapter/redis` in production; `cre
 On Instagram DMs, a card's `<Button>` and `<LinkButton>` elements become native Instagram buttons, up to three per message. A tap arrives as `onAction` with the button's `id` and `value`:
 
 ```tsx
-import { Actions, Button, Card, LinkButton, Text } from "chat";
+import { Actions, Button, Card, CardText, LinkButton } from "chat";
 
 bot.onNewMention(async (thread) => {
   await thread.post(
     <Card title="Track your order?">
-      <Text>We can send you shipping updates here.</Text>
+      <CardText>We can send you shipping updates here.</CardText>
       <Actions>
         <Button id="track" value="order-42">Yes please</Button>
         <LinkButton url="https://shop.example.com/orders/42">View order</LinkButton>
@@ -162,12 +162,14 @@ createAdeliAdapter({
    console.log(data.secret); // shown once
    ```
 
+   Replace `<your profile id>` with your Adeli profile id (see [List profiles](https://www.tryadeli.com/docs/api/profiles/list-profiles)).
+
 5. Store the signing secret the response returns as `ADELI_WEBHOOK_SECRET`. It is shown only once. To rotate it, delete the webhook and create it again.
 6. Send a test event from the webhook's row in the dashboard. Test events (`"test": true`) are verified and acknowledged without reaching your handlers.
 
-Every delivery is signed with `Adeli-Signature` (HMAC-SHA256 with a timestamp). The adapter rejects unsigned, mis-signed and stale (over 300 seconds) deliveries with `401`, answers `200` at once, and runs your handlers in `waitUntil`. Adeli retries failed deliveries for about nine hours with the same event id; Chat SDK deduplicates them.
+Every delivery is signed with `Adeli-Signature` (HMAC-SHA256 with a timestamp). The adapter rejects unsigned, mis-signed and stale (over 300 seconds) deliveries with `401`, answers `200` at once, and runs your handlers in `waitUntil`. Adeli retries failed deliveries for about nine hours with the same event id. Chat SDK drops redelivered messages and comments that arrive within its dedupe window (`dedupeTtlMs`, 10 minutes by default); button taps (`message.postback`) are not deduplicated.
 
-See the [Adeli webhooks docs](https://www.tryadeli.com/docs/api/webhooks) for the event payloads, and [`sample-messages.md`](https://github.com/kingscrosslabs/adeli-chat-sdk-adapter/blob/main/sample-messages.md) for examples.
+See the [Adeli webhooks docs](https://www.tryadeli.com/docs/api/webhooks) for the event payloads, and [`sample-messages.md`](https://github.com/kingscrosslabs/adeli-chat-sdk-adapter/blob/v1.0.1/sample-messages.md) for examples.
 
 ## Features
 
@@ -182,7 +184,7 @@ See the [Adeli webhooks docs](https://www.tryadeli.com/docs/api/webhooks) for th
 | `openDM` | Yes | Yes | Yes | n/a | n/a |
 | Inbound attachments | Yes | Yes | Yes | n/a | n/a |
 
-- A DM thread is one conversation between a connected account and one person. A comment thread is a top-level comment and its replies. Every inbound DM and top-level comment is a mention; replies under a comment reach `onSubscribedMessage` once the thread is subscribed.
+- A DM thread is one conversation between a connected account and one person. A comment thread is a top-level comment and its replies. Unless you register `onDirectMessage`, every inbound DM reaches `onNewMention`, as does every new top-level comment; replies under a comment reach `onSubscribedMessage` once the thread is subscribed.
 - All five surfaces show plain text, so the adapter flattens Markdown: it drops emphasis markers, writes links as `text (url)`, and starts list items with `- `.
 - `message.raw` is an `AdeliRawMessage`: `kind`, `accountId`, `platform`, the provider message or comment id, and the sender. `message.id` is the provider's id (an Instagram `mid`, a WhatsApp `wamid`, a comment id).
 
@@ -190,11 +192,12 @@ See the [Adeli webhooks docs](https://www.tryadeli.com/docs/api/webhooks) for th
 
 - Instagram, Facebook and WhatsApp accept free-text messages only within 24 hours of the person's last message. Outside it, a post throws `AdapterError` with code `window_closed`. To open a WhatsApp conversation, send an approved template with [`@adeli/sdk`](https://www.npmjs.com/package/@adeli/sdk) `messages.sendMessage({ body: { platform: "whatsapp", template } })`; Chat SDK messages cannot carry templates.
 - Bots can't edit messages, react or show typing. `editMessage`, `addReaction` and `removeReaction` throw `NotImplementedError`; `startTyping` resolves without doing anything, so portable bots keep working. `deleteMessage` works only on the account's own comments.
+- Instagram accounts connected through a Facebook Page before Unified Login, and TikTok accounts connected without comment access, send no events until reconnected in the Adeli dashboard.
 - Instagram allows three buttons per message. A card with more throws `ValidationError`. A button's `id` and `value` must fit Instagram's 1,000-character postback payload.
 - Posting files or attachments throws `ValidationError`.
 - DM history pages backward. `fetchMessages` with `direction: "forward"` on a DM reads up to 1,000 messages and returns them in one page.
 - A workspace without billing that has used its free monthly sends gets `AdapterRateLimitError` (with `retryAfter` set to the reset time). Provider rate limits (`429`) map to the same error.
-- `401` maps to `AuthenticationError`, `403 permission_required` to `PermissionError` (reconnect the account with the missing permission), `404` to `ResourceNotFoundError`, `400`/`422` to `ValidationError`, and `5xx` or network failures to `NetworkError`, all from `@chat-adapter/shared`.
+- `401` maps to `AuthenticationError`, `403` to `PermissionError` (for `permission_required`, reconnect the account with the missing permission), `404` to `ResourceNotFoundError`, `400`/`422` to `ValidationError`, and `5xx` or network failures to `NetworkError`, all from `@chat-adapter/shared`.
 
 ## License
 
