@@ -1,5 +1,11 @@
 # @adeli/chat-sdk-adapter
 
+## 1.0.2
+
+### Patch Changes
+
+- 03e6b63: README: the Buttons example uses `CardText` (the body text was dropped with `Text`), and the webhook, mention-routing, error-mapping and limitations notes are corrected.
+
 ## 1.0.1
 
 ### Patch Changes
